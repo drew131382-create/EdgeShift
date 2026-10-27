@@ -1,0 +1,24 @@
+name: macOS checks
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Swift tests
+        run: swift test
+      - name: Build local test app
+        env:
+          EDGESHIFT_SIGNING_IDENTITY: '-'
+          EDGESHIFT_BUNDLE_ID: org.edgeshift.ci
+        run: ./scripts/build-app.sh
+      - name: Verify app signature
+        run: codesign --verify --deep --strict build/EdgeShift.app
