@@ -24,7 +24,8 @@ struct ContentView: View {
                     Text("显示器排列").font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
-                Circle().fill(model.snapshot == nil ? Color.orange : Color.green).frame(width: 8, height: 8)
+                Circle().fill(model.automaticReady ? Color.green : Color.orange).frame(width: 8, height: 8)
+                    .accessibilityLabel(model.automaticReady ? "自动排列已就绪" : "自动排列未就绪或已暂停")
             }
             if let snapshot = model.snapshot {
                 if snapshot.secondaries.count > 1 {
@@ -75,8 +76,18 @@ struct ContentView: View {
                 .opacity(model.progress > 0 ? 1 : 0)
                 .accessibilityHidden(model.progress <= 0)
             Toggle("登录时自动启动", isOn: Binding(get: { model.loginEnabled }, set: { model.setLogin($0) }))
+            Button("自动暂停设置…") { model.showPauseSettings() }
             Divider()
-            Text(model.notice ?? model.status).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(model.displayedStatus).lineLimit(2)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(height: 34, alignment: .topLeading)
+                    .help(model.displayedStatus)
+                Text(model.notice ?? "").lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(height: 16, alignment: .topLeading)
+                    .help(model.notice ?? "")
+            }.font(.caption).foregroundStyle(.secondary)
             if !model.permission && model.enabled {
                 HStack {
                     Button("请求输入监控权限") { model.requestPermission() }
