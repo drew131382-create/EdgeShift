@@ -8,7 +8,10 @@ struct EdgeShiftApp: App {
         MenuBarExtra {
             ContentView(model: model)
         } label: {
-            MenuBarIcon(pushing: model.progress > 0)
+            Image(systemName: "display.2")
+                .symbolRenderingMode(.monochrome)
+                .font(.system(size: 15, weight: model.progress > 0 ? .semibold : .regular))
+                .accessibilityLabel("EdgeShift，主屏与副屏")
         }
         .menuBarExtraStyle(.window)
     }
