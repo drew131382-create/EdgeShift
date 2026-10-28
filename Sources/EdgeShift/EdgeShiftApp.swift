@@ -8,7 +8,7 @@ struct EdgeShiftApp: App {
         MenuBarExtra {
             ContentView(model: model)
         } label: {
-            Image(systemName: model.progress > 0 ? "rectangle.split.2x1.fill" : "rectangle.split.2x1")
+            MenuBarIcon(pushing: model.progress > 0)
         }
         .menuBarExtraStyle(.window)
     }
