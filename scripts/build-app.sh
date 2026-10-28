@@ -3,6 +3,11 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 IDENTITY="${EDGESHIFT_SIGNING_IDENTITY:-}"
 BUNDLE_ID="${EDGESHIFT_BUNDLE_ID:-com.edgeshift.app}"
+RESET_INPUT_MONITORING="${EDGESHIFT_RESET_INPUT_MONITORING:-1}"
+if [[ "$RESET_INPUT_MONITORING" != "0" && "$RESET_INPUT_MONITORING" != "1" ]]; then
+    echo "EDGESHIFT_RESET_INPUT_MONITORING must be 0 or 1." >&2
+    exit 1
+fi
 if [[ ! "$BUNDLE_ID" =~ ^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$ ]]; then
     echo "Invalid EDGESHIFT_BUNDLE_ID." >&2
     exit 1
@@ -44,8 +49,8 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 <key>CFBundleName</key><string>EdgeShift</string>
 <key>CFBundleIconFile</key><string>AppIcon</string>
 <key>CFBundlePackageType</key><string>APPL</string>
-<key>CFBundleShortVersionString</key><string>0.1.5</string>
-<key>CFBundleVersion</key><string>6</string>
+<key>CFBundleShortVersionString</key><string>0.1.7</string>
+<key>CFBundleVersion</key><string>8</string>
 <key>LSMinimumSystemVersion</key><string>13.0</string>
 <key>LSUIElement</key><true/>
 <key>NSHighResolutionCapable</key><true/>
@@ -53,4 +58,17 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 PLIST
 /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $BUNDLE_ID" "$APP/Contents/Info.plist"
 codesign --force --deep --sign "$IDENTITY" "$APP"
+codesign --verify --deep --strict "$APP"
 echo "Built $APP"
+if [[ "$RESET_INPUT_MONITORING" == "1" ]]; then
+    echo "Resetting Input Monitoring authorization for $BUNDLE_ID (all copies with this bundle ID)."
+    # A fresh bundle ID must be known to Launch Services before tccutil accepts it.
+    /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$APP"
+    if ! tccutil reset ListenEvent "$BUNDLE_ID"; then
+        echo "Input Monitoring reset failed; check macOS privacy settings." >&2
+        exit 1
+    fi
+    echo "Start or restart the app to request authorization; approve it in System Settings."
+else
+    echo "Input Monitoring reset skipped."
+fi

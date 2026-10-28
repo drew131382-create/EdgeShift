@@ -12,6 +12,7 @@ final class AppModel: ObservableObject {
     @Published var duration: Double { didSet { UserDefaults.standard.set(duration, forKey: "duration"); reset() } }
     @Published var loginEnabled = false
     @Published var permission = false
+    @Published var manualDisplayID: CGDirectDisplayID = 0
     private var tap: CFMachPort?
     private var source: CFRunLoopSource?
     private var tracker = PushTracker()
@@ -20,6 +21,7 @@ final class AppModel: ObservableObject {
     private var isArranging = false
     private var screenLocked = false
     private var permissionFallbackScheduled = false
+    private var displayCycle = DisplayCycle<CGDirectDisplayID>()
 
     init() {
         let defaults = UserDefaults.standard
@@ -46,13 +48,22 @@ final class AppModel: ObservableObject {
     @objc private func wake() { reset(); refresh(); updateTap() }
     func refresh() {
         let new = DisplayManager.snapshot()
-        if new != snapshot { snapshot = new; reset() }
+        if new != snapshot {
+            if new?.mainID != snapshot?.mainID || Set(new?.displays.map(\.id) ?? []) != Set(snapshot?.displays.map(\.id) ?? []) {
+                displayCycle.reset()
+            }
+            snapshot = new
+            reset()
+        }
+        if let new, !new.secondaries.contains(where: { $0.id == manualDisplayID }) {
+            manualDisplayID = new.secondaries.first?.id ?? 0
+        }
         permission = CGPreflightListenEventAccess()
         if permission && notice == "请在系统设置的“隐私与安全性 → 输入监控”中开启 EdgeShift。" { notice = nil }
-        if new == nil { status = "需要两块非镜像的扩展显示器" }
+        if new == nil { status = "需要至少两块非镜像的扩展显示器" }
         else if !enabled { status = "自动排列已关闭" }
         else if !permission { status = "请授予输入监控权限以启用自动排列" }
-        else { status = "双屏已连接，自动排列已就绪" }
+        else { status = "已连接 \(new!.displays.count) 块屏幕，自动排列已就绪" }
     }
     private func tick() {
         if tracker.edge != nil && ProcessInfo.processInfo.systemUptime - tracker.last > 0.2 { reset() }
@@ -89,16 +100,26 @@ final class AppModel: ObservableObject {
     }
     func refreshLogin() { loginEnabled = SMAppService.mainApp.status == .enabled }
     private func reset() { tracker.reset(); progress = 0 }
-    func arrange(_ origin: CGPoint) {
-        guard let s = snapshot, !isArranging else { return }
+    @discardableResult
+    func arrange(displayID: CGDirectDisplayID, origin: CGPoint) -> Bool {
+        guard let s = snapshot, !isArranging else { return false }
         isArranging = true; reset()
-        let error = DisplayManager.arrange(s, origin: origin)
+        let error = DisplayManager.arrange(s, displayID: displayID, origin: origin)
         isArranging = false
-        if let error { notice = error } else { cooldownUntil = ProcessInfo.processInfo.systemUptime + 3; refresh(); notice = "显示器排列已更新" }
+        if let error { notice = error; return false }
+        cooldownUntil = ProcessInfo.processInfo.systemUptime + 3
+        refresh(); notice = "显示器排列已更新"
+        return true
     }
     func move(_ edge: Side) {
-        guard let s = snapshot else { return }
-        arrange(LayoutGeometry.centeredOrigin(edge: edge, main: s.main, secondary: s.secondary))
+        move(displayID: manualDisplayID, edge: edge)
+    }
+    @discardableResult
+    private func move(displayID: CGDirectDisplayID, edge: Side) -> Bool {
+        guard let s = snapshot, let target = s.secondaries.first(where: { $0.id == displayID }) else { return false }
+        let obstacles = s.displays.filter { $0.id != displayID && $0.id != s.mainID }.map(\.bounds)
+        let origin = LayoutGeometry.nextAvailableOrigin(edge: edge, main: s.main, target: target.bounds, obstacles: obstacles)
+        return arrange(displayID: displayID, origin: origin)
     }
     private func updateTap() {
         if let source { CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes); self.source = nil }
@@ -128,12 +149,19 @@ final class AppModel: ObservableObject {
         let dx = CGFloat(event.getIntegerValueField(.mouseEventDeltaX))
         let dy = CGFloat(event.getIntegerValueField(.mouseEventDeltaY))
         guard let edge = LayoutGeometry.outwardEdge(point: p, deltaX: dx, deltaY: dy, main: s.main),
-              !LayoutGeometry.traversable(edge: edge, at: p, main: s.main, secondary: s.secondary) else { reset(); return }
+              !s.secondaries.contains(where: { LayoutGeometry.traversable(edge: edge, at: p, main: s.main, secondary: $0.bounds) }) else { reset(); return }
         progress = tracker.update(edge: edge, time: now, duration: duration)
         if progress >= 1 {
             cooldownUntil = now + 3
             reset()
-            DispatchQueue.main.async { [weak self] in self?.move(edge) }
+            let mainID = s.mainID
+            let ids = s.secondaries.map(\.id)
+            guard let target = displayCycle.next(in: ids) else { return }
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.snapshot?.mainID == mainID,
+                      self.snapshot?.secondaries.map(\.id) == ids else { return }
+                if self.move(displayID: target, edge: edge) { self.displayCycle.didMove(target) }
+            }
         }
     }
 }

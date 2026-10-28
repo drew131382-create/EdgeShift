@@ -21,15 +21,27 @@ struct ContentView: View {
             HStack(alignment: .center) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("EdgeShift").font(.title3.weight(.semibold))
-                    Text("双屏排列").font(.caption).foregroundStyle(.secondary)
+                    Text("显示器排列").font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
                 Circle().fill(model.snapshot == nil ? Color.orange : Color.green).frame(width: 8, height: 8)
             }
             if let snapshot = model.snapshot {
-                ArrangementView(snapshot: snapshot, onMove: model.arrange)
+                if snapshot.secondaries.count > 1 {
+                    Picker("手动调整", selection: $model.manualDisplayID) {
+                        ForEach(snapshot.secondaries) { display in
+                            Text("\(snapshot.number(for: display.id)) · \(display.name)").tag(display.id)
+                        }
+                    }
+                    Text("自动排列按系统识别顺序轮流选择副屏；重新连接后顺序可能变化。")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                ArrangementView(snapshot: snapshot, selectedID: model.manualDisplayID, onMove: { id, origin in
+                    model.manualDisplayID = id
+                    model.arrange(displayID: id, origin: origin)
+                })
                     .frame(height: 145)
-                Text("拖动副屏调整位置，松开后自动贴合主屏。")
+                Text("拖动副屏贴合其他屏幕；快捷按钮针对所选副屏。")
                     .font(.caption).foregroundStyle(.secondary)
                 VStack(spacing: 8) {
                     HStack(spacing: 8) {
@@ -51,6 +63,7 @@ struct ContentView: View {
                 Text("持续推动")
                 Spacer()
                 Picker("持续推动", selection: $model.duration) {
+                    Text("0.3 秒").tag(0.3)
                     Text("0.5 秒").tag(0.5)
                     Text("1 秒").tag(1.0)
                     Text("2 秒").tag(2.0)
@@ -76,8 +89,6 @@ struct ContentView: View {
             }.font(.caption)
         }
         .padding(18).frame(width: 350)
-        .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(.regularMaterial))
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
     private func moveButton(_ title: String, icon: String, side: Side) -> some View {
@@ -92,41 +103,51 @@ struct ContentUnavailableViewCompat: View {
     var body: some View {
         VStack(spacing: 8) {
             Image(systemName: "display.2").font(.system(size: 28)).foregroundStyle(.secondary)
-            Text("连接两块扩展显示器").font(.callout.weight(.medium))
-            Text("镜像模式和多屏暂不支持").font(.caption).foregroundStyle(.secondary)
+            Text("连接至少两块扩展显示器").font(.callout.weight(.medium))
+            Text("镜像模式暂不支持").font(.caption).foregroundStyle(.secondary)
         }
     }
 }
 
 final class DragModel: ObservableObject {
     @Published var translation = CGSize.zero
+    @Published var displayID: CGDirectDisplayID?
 }
 
 struct ArrangementView: View {
     let snapshot: DisplaySnapshot
-    let onMove: (CGPoint) -> Void
+    let selectedID: CGDirectDisplayID
+    let onMove: (CGDirectDisplayID, CGPoint) -> Void
     @StateObject private var dragModel = DragModel()
     var body: some View {
         GeometryReader { proxy in
-            let union = snapshot.main.union(snapshot.secondary)
+            let union = snapshot.displays.dropFirst().reduce(snapshot.displays[0].bounds) { $0.union($1.bounds) }
             let scale = min((proxy.size.width - 16) / max(union.width, 1), (proxy.size.height - 16) / max(union.height, 1), 0.13)
             let offset = CGPoint(x: (proxy.size.width - union.width * scale) / 2 - union.minX * scale,
                                  y: (proxy.size.height - union.height * scale) / 2 - union.minY * scale)
             ZStack(alignment: .topLeading) {
                 RoundedRectangle(cornerRadius: 10).fill(Color.primary.opacity(0.04))
-                screen(snapshot.main, label: "主屏", color: .secondary, scale: scale)
-                    .position(x: offset.x + snapshot.main.midX * scale, y: offset.y + snapshot.main.midY * scale)
-                screen(snapshot.secondary, label: "副屏", color: .accentColor, scale: scale)
-                    .position(x: offset.x + snapshot.secondary.midX * scale + dragModel.translation.width, y: offset.y + snapshot.secondary.midY * scale + dragModel.translation.height)
-                    .gesture(DragGesture(minimumDistance: 2)
-                        .onChanged { dragModel.translation = $0.translation }
-                        .onEnded { value in
-                            let point = CGPoint(x: snapshot.secondary.minX + value.translation.width / scale,
-                                                y: snapshot.secondary.minY + value.translation.height / scale)
-                            dragModel.translation = .zero
-                            onMove(LayoutGeometry.snapped(main: snapshot.main, secondary: snapshot.secondary.size, proposed: point))
-                        })
-                    .accessibilityLabel("副屏，可拖动调整位置")
+                ForEach(snapshot.displays) { display in
+                    if display.id == snapshot.mainID {
+                        screen(display.bounds, label: "主屏 \(snapshot.number(for: display.id))", color: .secondary, scale: scale)
+                            .position(x: offset.x + display.bounds.midX * scale, y: offset.y + display.bounds.midY * scale)
+                    } else {
+                        screen(display.bounds, label: "副屏 \(snapshot.number(for: display.id))", color: display.id == selectedID ? .accentColor : .secondary, scale: scale)
+                            .position(x: offset.x + display.bounds.midX * scale + (dragModel.displayID == display.id ? dragModel.translation.width : 0),
+                                      y: offset.y + display.bounds.midY * scale + (dragModel.displayID == display.id ? dragModel.translation.height : 0))
+                            .gesture(DragGesture(minimumDistance: 2)
+                                .onChanged { dragModel.displayID = display.id; dragModel.translation = $0.translation }
+                                .onEnded { value in
+                                    let point = CGPoint(x: display.bounds.minX + value.translation.width / scale,
+                                                        y: display.bounds.minY + value.translation.height / scale)
+                                    dragModel.translation = .zero; dragModel.displayID = nil
+                                    let otherScreens = snapshot.displays.filter { $0.id != display.id }.map(\.bounds)
+                                    let origin = LayoutGeometry.snappedToDisplays(secondary: display.bounds.size, proposed: point, otherScreens: otherScreens) ?? point
+                                    onMove(display.id, origin)
+                                })
+                            .accessibilityLabel("副屏 \(snapshot.number(for: display.id))，可拖动调整位置")
+                    }
+                }
             }.clipped()
         }
     }

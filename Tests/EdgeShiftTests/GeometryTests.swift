@@ -47,4 +47,36 @@ final class GeometryTests: XCTestCase {
         XCTAssertEqual(tracker.update(edge: .left, time: 12.3, duration: 2), 0)
         XCTAssertEqual(tracker.update(edge: .right, time: 12.4, duration: 2), 0)
     }
+
+    func testMultiDisplayPlacementAndConnectivity() {
+        let base = CGRect(x: 0, y: 0, width: 1000, height: 800)
+        let target = CGRect(x: 0, y: 0, width: 600, height: 400)
+        let right = CGRect(x: 1000, y: 200, width: 600, height: 400)
+        let farRight = CGRect(x: 1600, y: 200, width: 500, height: 400)
+        let origin = LayoutGeometry.nextAvailableOrigin(edge: .right, main: base, target: target, obstacles: [right, farRight])
+        XCTAssertEqual(origin, CGPoint(x: 2100, y: 200))
+        let offsetRight = CGRect(x: 1000, y: 700, width: 600, height: 100)
+        XCTAssertEqual(LayoutGeometry.nextAvailableOrigin(edge: .right, main: base, target: target, obstacles: [offsetRight]), CGPoint(x: 1600, y: 200))
+        XCTAssertFalse(LayoutGeometry.allConnected([base, offsetRight, CGRect(x: 1600, y: 200, width: 600, height: 400)]))
+        XCTAssertTrue(LayoutGeometry.allConnected([base, right, farRight, CGRect(origin: origin, size: target.size)]))
+        XCTAssertFalse(LayoutGeometry.allConnected([base, farRight]))
+        XCTAssertEqual(LayoutGeometry.nextAvailableOrigin(edge: .left, main: base, target: target, obstacles: [CGRect(x: -600, y: 200, width: 600, height: 400)]), CGPoint(x: -1200, y: 200))
+        XCTAssertEqual(LayoutGeometry.nextAvailableOrigin(edge: .top, main: base, target: target, obstacles: [CGRect(x: 200, y: -400, width: 600, height: 400)]), CGPoint(x: 200, y: -800))
+        XCTAssertEqual(LayoutGeometry.nextAvailableOrigin(edge: .bottom, main: base, target: target, obstacles: [CGRect(x: 200, y: 800, width: 600, height: 400)]), CGPoint(x: 200, y: 1200))
+        XCTAssertEqual(LayoutGeometry.snappedToDisplays(secondary: target.size, proposed: CGPoint(x: 1610, y: 210), otherScreens: [base, right]), CGPoint(x: 1600, y: 210))
+    }
+
+    func testDisplayCycleFollowsEnumerationAndResets() {
+        var cycle = DisplayCycle<Int>()
+        XCTAssertEqual(cycle.next(in: [42, 7, 19]), 42)
+        cycle.didMove(42)
+        XCTAssertEqual(cycle.next(in: [42, 7, 19]), 7)
+        cycle.didMove(7)
+        XCTAssertEqual(cycle.next(in: [42, 7, 19]), 19)
+        cycle.didMove(19)
+        XCTAssertEqual(cycle.next(in: [42, 7, 19]), 42)
+        cycle.reset()
+        XCTAssertEqual(cycle.next(in: [7, 42]), 7)
+        XCTAssertNil(cycle.next(in: []))
+    }
 }

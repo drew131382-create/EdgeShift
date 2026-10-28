@@ -16,6 +16,16 @@ enum LayoutGeometry {
         return candidates.min(by: { $0.0 < $1.0 })!.1
     }
     static func clamp(_ x: CGFloat, _ lo: CGFloat, _ hi: CGFloat) -> CGFloat { min(max(x, lo), hi) }
+
+    static func snappedToDisplays(secondary: CGSize, proposed: CGPoint, otherScreens: [CGRect]) -> CGPoint? {
+        let candidates = otherScreens.map { snapped(main: $0, secondary: secondary, proposed: proposed) }
+        return candidates.filter { candidate in
+            let rect = CGRect(origin: candidate, size: secondary)
+            return !otherScreens.contains(where: { $0.intersects(rect) }) && allConnected(otherScreens + [rect])
+        }.min { a, b in
+            hypot(a.x - proposed.x, a.y - proposed.y) < hypot(b.x - proposed.x, b.y - proposed.y)
+        }
+    }
     static func traversable(edge: Side, at point: CGPoint, main: CGRect, secondary: CGRect) -> Bool {
         switch edge {
         case .left:
@@ -52,6 +62,63 @@ enum LayoutGeometry {
         case .bottom: return CGPoint(x: (main.midX - secondary.width / 2).rounded(), y: main.maxY)
         }
     }
+
+    // Place beyond screens already on the requested side, then avoid any other overlaps.
+    static func nextAvailableOrigin(edge: Side, main: CGRect, target: CGRect, obstacles: [CGRect]) -> CGPoint {
+        var origin = centeredOrigin(edge: edge, main: main, secondary: target)
+        switch edge {
+        case .left:
+            if let boundary = obstacles.filter({ $0.maxX <= main.minX }).map(\.minX).min() { origin.x = boundary - target.width }
+        case .right:
+            if let boundary = obstacles.filter({ $0.minX >= main.maxX }).map(\.maxX).max() { origin.x = boundary }
+        case .top:
+            if let boundary = obstacles.filter({ $0.maxY <= main.minY }).map(\.minY).min() { origin.y = boundary - target.height }
+        case .bottom:
+            if let boundary = obstacles.filter({ $0.minY >= main.maxY }).map(\.maxY).max() { origin.y = boundary }
+        }
+        for _ in 0...obstacles.count {
+            let rect = CGRect(origin: origin, size: target.size)
+            let collisions = obstacles.filter { $0.intersects(rect) }
+            guard !collisions.isEmpty else { break }
+            switch edge {
+            case .left: origin.x = collisions.map(\.minX).min()! - target.width
+            case .right: origin.x = collisions.map(\.maxX).max()!
+            case .top: origin.y = collisions.map(\.minY).min()! - target.height
+            case .bottom: origin.y = collisions.map(\.maxY).max()!
+            }
+        }
+        return origin
+    }
+
+    static func allConnected(_ screens: [CGRect]) -> Bool {
+        guard !screens.isEmpty else { return false }
+        func adjacent(_ a: CGRect, _ b: CGRect) -> Bool {
+            let verticalOverlap = min(a.maxY, b.maxY) - max(a.minY, b.minY) > 0
+            let horizontalOverlap = min(a.maxX, b.maxX) - max(a.minX, b.minX) > 0
+            let horizontalTouch = abs(a.maxX - b.minX) < 1 || abs(b.maxX - a.minX) < 1
+            let verticalTouch = abs(a.maxY - b.minY) < 1 || abs(b.maxY - a.minY) < 1
+            return (horizontalTouch && verticalOverlap) || (verticalTouch && horizontalOverlap)
+        }
+        var seen: Set<Int> = [0]
+        var pending = [0]
+        while let current = pending.popLast() {
+            for i in screens.indices where !seen.contains(i) && adjacent(screens[current], screens[i]) {
+                seen.insert(i); pending.append(i)
+            }
+        }
+        return seen.count == screens.count
+    }
+}
+
+struct DisplayCycle<ID: Equatable> {
+    private(set) var last: ID?
+    func next(in ordered: [ID]) -> ID? {
+        guard !ordered.isEmpty else { return nil }
+        guard let last, let index = ordered.firstIndex(of: last) else { return ordered[0] }
+        return ordered[(index + 1) % ordered.count]
+    }
+    mutating func didMove(_ id: ID) { last = id }
+    mutating func reset() { last = nil }
 }
 
 struct PushTracker {

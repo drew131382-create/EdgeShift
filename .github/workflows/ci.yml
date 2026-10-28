@@ -19,6 +19,7 @@ jobs:
         env:
           EDGESHIFT_SIGNING_IDENTITY: '-'
           EDGESHIFT_BUNDLE_ID: org.edgeshift.ci
+          EDGESHIFT_RESET_INPUT_MONITORING: '0'
         run: ./scripts/build-app.sh
       - name: Verify app signature
         run: codesign --verify --deep --strict build/EdgeShift.app
