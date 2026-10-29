@@ -1,5 +1,13 @@
 # EdgeShift
 
+<p align="center">
+  <a href="https://github.com/drew131382-create/EdgeShift/releases/download/v0.1.9/EdgeShift-0.1.9-experimental.dmg">
+    <img src="https://img.shields.io/badge/下载%20macOS%20DMG-v0.1.9-1677ff?style=for-the-badge&logo=apple&logoColor=white" alt="下载 EdgeShift macOS DMG v0.1.9">
+  </a>
+  &nbsp; <a href="https://github.com/drew131382-create/EdgeShift/releases/tag/v0.1.9">查看 Release 说明</a>
+</p>
+<p align="center"><sub>Apple Silicon（arm64）· macOS 13 或更新版本</sub></p>
+
 EdgeShift 是一个适用于 macOS 的多屏菜单栏应用（实验性原型）。当系统排列与实际摆放不一致时，可在主屏不可跨越的边缘持续向外推动鼠标，让副屏移动到对应方向；也可在菜单栏手动拖动排列。
 
 ## 功能
